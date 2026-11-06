@@ -1,11 +1,65 @@
 import pandas as pd
 import requests
 import os
+import re
+from html import unescape
+from html.parser import HTMLParser
 
 CSV_OFFRES_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "offres_stages_it.csv"
 )
+
+
+class _HTMLDescriptionParser(HTMLParser):
+    """Convertit les descriptions HTML des flux d'offres en texte lisible."""
+
+    BLOCK_TAGS = {"p", "div", "br", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "tr"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.ignored_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style"}:
+            self.ignored_depth += 1
+        elif not self.ignored_depth and tag in self.BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in {"script", "style"} and self.ignored_depth:
+            self.ignored_depth -= 1
+        elif not self.ignored_depth and tag in self.BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_startendtag(self, tag, attrs):
+        if not self.ignored_depth and tag in self.BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self.ignored_depth:
+            self.parts.append(data)
+
+
+def nettoyer_description(description):
+    """Retire les balises HTML et garde les paragraphes et entités lisibles."""
+    raw = str(description or "").strip()
+    if not raw:
+        return ""
+    # Certains flux renvoient les balises HTML échappées (&lt;p&gt;...).
+    if re.search(r"&lt;\s*/?\s*(?:p|div|br|li|ul|ol|h[1-6])\b", raw, flags=re.IGNORECASE):
+        raw = unescape(raw)
+    parser = _HTMLDescriptionParser()
+    try:
+        parser.feed(raw)
+        parser.close()
+        text = "".join(parser.parts)
+    except Exception:
+        text = raw
+    text = unescape(text).replace("\xa0", " ")
+    lines = [re.sub(r"[\t\r ]+", " ", line).strip() for line in text.splitlines()]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(line for line in lines if line)).strip()
 
 def fetch_maroc_jobs():
     """Collecte les offres IT ciblées exclusivement sur le Maroc et Marrakech."""
@@ -34,7 +88,7 @@ def fetch_maroc_jobs():
                         "domaine": job.get("category", "Software Development"),
                         "type_offre": "Stage / Offre IT",
                         "ville": ville_affiche,
-                        "description": job.get("description", "")[:280] + "...",
+                        "description": nettoyer_description(job.get("description", "")),
                         "url": job.get("url"),
                         "source": "Remotive",
                         "date_publication": job.get("publication_date", "")[:10]

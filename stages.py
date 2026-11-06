@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from fetch_jobs import load_or_create_jobs
+from fetch_jobs import load_or_create_jobs, nettoyer_description
 
 
 
@@ -42,6 +42,8 @@ def page_stages() -> None:
         if col not in df.columns:
             df[col] = ""
         df[col] = df[col].fillna("").astype(str).str.strip()
+    # Nettoie aussi les descriptions restées dans un ancien cache de session/CSV.
+    df["description"] = df["description"].map(nettoyer_description)
 
     def _date_value(value):
         if not value:
@@ -192,7 +194,7 @@ def page_stages() -> None:
         domain = str(job.get("domaine") or "Domaine non renseigné")
         offer_type = str(job.get("type_offre") or "Type non renseigné")
         source = str(job.get("source") or "Source non renseignée")
-        description = str(job.get("description") or "Description non disponible.")
+        description = nettoyer_description(job.get("description")) or "Description non disponible dans la source."
         description = description[:520] + ("…" if len(description) > 520 else "")
         published = job.get("_date")
         date_text = published.strftime("%d/%m/%Y") if published else "Date non renseignée"
