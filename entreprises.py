@@ -315,17 +315,242 @@ def page_candidature() -> None:
     st.success(f"Candidature envoyée à {r.get('nom', 'l’entreprise')} avec le CV en pièce jointe.")
 
 def page_analyse() -> None:
-  st.subheader("📊 Analyse de l'écosystème")
-  c1, c2 = st.columns(2)
-  with c1:
-    st.bar_chart(DATA["domaine"].value_counts())
-  with c2:
-    stats = pd.Series({
-        "Avec email": len(DATA[DATA["email"] != ""]),
-        "Avec site web": len(DATA[DATA["site_web"] != ""]),
-        "Sans email": len(DATA[DATA["email"] == ""]),
-    })
-    st.bar_chart(stats)
+  try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+  except ImportError:
+    px = go = None
+
+  couleurs = ["#2563EB", "#7C3AED", "#06B6D4", "#10B981", "#F59E0B", "#EC4899", "#EF4444"]
+  df = DATA.copy() if isinstance(DATA, pd.DataFrame) else pd.DataFrame(DATA)
+  if df.empty:
+    st.info("Aucune entreprise réelle n’est disponible pour l’analyse.")
+    return
+
+  # Les graphiques utilisent des colonnes présentes dans le dataset réel.
+  for colonne in ("nom", "domaine", "secteur", "sous_secteur", "type_acteur", "email", "site_web", "services_ia", "note"):
+    if colonne not in df.columns:
+      df[colonne] = ""
+    df[colonne] = df[colonne].fillna("").astype(str).str.strip()
+  if "note_num" in df.columns:
+    df["_note"] = pd.to_numeric(df["note_num"], errors="coerce")
+  else:
+    df["_note"] = pd.to_numeric(df["note"].str.replace(",", ".", regex=False), errors="coerce")
+  df["_email_ok"] = df["email"].str.casefold().ne("") & df["email"].str.casefold().ne("nan")
+  df["_site_ok"] = df["site_web"].str.casefold().ne("") & df["site_web"].str.casefold().ne("nan")
+  for colonne in ("domaine", "secteur", "sous_secteur", "type_acteur"):
+    df[colonne] = df[colonne].replace("", "Non renseigné")
+  if "id" not in df.columns:
+    df["id"] = df.index + 1
+
+  st.markdown("""
+  <style>
+  .analyse-hero{padding:26px 30px;border-radius:22px;color:#fff;background:linear-gradient(120deg,#172554,#2563EB 58%,#7C3AED);box-shadow:0 14px 32px rgba(37,99,235,.18);margin:4px 0 22px}
+  .analyse-hero h1{color:#fff;margin:2px 0 7px;font-size:clamp(1.55rem,3vw,2.15rem)}
+  .analyse-hero p{color:#eaf0ff;margin:0}
+  .analyse-eyebrow{font-size:.75rem;font-weight:800;letter-spacing:.12em;opacity:.78}
+  </style>
+  <div class="analyse-hero"><div class="analyse-eyebrow">IA JOB · BUSINESS INTELLIGENCE</div>
+  <h1>📊 Analyse de l’écosystème IA &amp; IT</h1>
+  <p>Explorez les données et découvrez les tendances des entreprises technologiques à Marrakech.</p></div>
+  """, unsafe_allow_html=True)
+
+  # Filtres dynamiques basés sur les valeurs présentes.
+  def options(colonne):
+    return sorted(v for v in df[colonne].unique().tolist() if v)
+
+  domaines = options("domaine")
+  secteurs = options("secteur")
+  types = options("type_acteur")
+  for cle, defaut in (("analyse_domaine", "Tous"), ("analyse_secteur", "Tous"), ("analyse_type", "Tous"),
+                      ("analyse_note_min", 0.0), ("analyse_email", "Tous"), ("analyse_site", "Tous")):
+    st.session_state.setdefault(cle, defaut)
+
+  def reinitialiser_analyse():
+    st.session_state["analyse_domaine"] = "Tous"
+    st.session_state["analyse_secteur"] = "Tous"
+    st.session_state["analyse_type"] = "Tous"
+    st.session_state["analyse_note_min"] = 0.0
+    st.session_state["analyse_email"] = "Tous"
+    st.session_state["analyse_site"] = "Tous"
+    st.session_state["analyse_table_recherche"] = ""
+
+  st.subheader("🎛️ Filtres")
+  f1, f2, f3, f4, f5, f6 = st.columns([1.2, 1.2, 1.2, 1.1, 1, 1])
+  domaine_sel = f1.selectbox("Domaine", ["Tous"] + domaines, key="analyse_domaine")
+  secteur_sel = f2.selectbox("Secteur", ["Tous"] + secteurs, key="analyse_secteur")
+  type_sel = f3.selectbox("Type d’acteur", ["Tous"] + types, key="analyse_type")
+  has_ratings = df["_note"].notna().any()
+  note_min = f4.slider("Note minimale", 0.0, 5.0, step=0.5, key="analyse_note_min", disabled=not has_ratings)
+  email_sel = f5.selectbox("Email", ["Tous", "Avec email", "Sans email"], key="analyse_email")
+  site_sel = f6.selectbox("Site web", ["Tous", "Avec site", "Sans site"], key="analyse_site")
+  st.button("↺ Réinitialiser les filtres", on_click=reinitialiser_analyse, key="analyse_reset")
+
+  mask = pd.Series(True, index=df.index)
+  if domaine_sel != "Tous": mask &= df["domaine"].eq(domaine_sel)
+  if secteur_sel != "Tous": mask &= df["secteur"].eq(secteur_sel)
+  if type_sel != "Tous": mask &= df["type_acteur"].eq(type_sel)
+  if note_min > 0: mask &= df["_note"].fillna(0).ge(note_min)
+  if email_sel == "Avec email": mask &= df["_email_ok"]
+  elif email_sel == "Sans email": mask &= ~df["_email_ok"]
+  if site_sel == "Avec site": mask &= df["_site_ok"]
+  elif site_sel == "Sans site": mask &= ~df["_site_ok"]
+  vue = df.loc[mask].copy()
+
+  note_disponibles = vue.loc[vue["_note"].between(0.01, 5), "_note"]
+  note_moyenne = f"{note_disponibles.mean():.1f}/5" if not note_disponibles.empty else "—"
+  kpis = [
+    ("🏢 Entreprises", len(vue)),
+    ("🧭 Domaines", vue["domaine"].nunique() if not vue.empty else 0),
+    ("✉️ Avec email", int(vue["_email_ok"].sum())),
+    ("🌐 Avec site", int(vue["_site_ok"].sum())),
+    ("⭐ Note moyenne", note_moyenne),
+  ]
+  st.caption(f"Analyse de {len(vue)} entreprise(s) après filtres · {len(df)} dans le dataset")
+  for col, (label, value) in zip(st.columns(5), kpis):
+    with col:
+      st.metric(label, value)
+
+  if vue.empty:
+    st.info("Aucune entreprise ne correspond aux filtres sélectionnés.")
+    return
+
+  st.markdown("### 💡 Insights & découvertes")
+  insight_cols = st.columns(4)
+  domaine_top = vue["domaine"].value_counts()
+  secteur_top = vue["secteur"].value_counts()
+  insights = [
+    ("Domaine principal", domaine_top.index[0] if not domaine_top.empty else "—"),
+    ("Secteur principal", secteur_top.index[0] if not secteur_top.empty else "—"),
+    ("Couverture email", f"{vue['_email_ok'].mean() * 100:.1f}%"),
+    ("Couverture site web", f"{vue['_site_ok'].mean() * 100:.1f}%"),
+  ]
+  for col, (label, value) in zip(insight_cols, insights):
+    with col:
+      st.container(border=True).metric(label, value)
+  domaine_note = vue[vue["_note"].between(0.01, 5)].groupby("domaine")["_note"].mean().sort_values(ascending=False)
+  if not domaine_note.empty:
+    st.caption(f"Meilleure note moyenne observée : {domaine_note.index[0]} ({domaine_note.iloc[0]:.1f}/5), sur les entreprises notées.")
+
+  if px is None or go is None:
+    st.warning("Plotly n’est pas installé. Ajoutez `plotly` aux dépendances de Streamlit Cloud.")
+  else:
+    st.markdown("### 🧩 Répartition des entreprises")
+    c1, c2 = st.columns(2)
+    domaine_counts = vue["domaine"].value_counts().rename_axis("Domaine").reset_index(name="Entreprises")
+    with c1:
+      fig = px.pie(domaine_counts, names="Domaine", values="Entreprises", hole=.38,
+                   title="Répartition des entreprises par domaine", color_discrete_sequence=couleurs)
+      fig.update_traces(textposition="inside", textinfo="percent", hovertemplate="%{label}<br>%{value} entreprise(s)<extra></extra>")
+      fig.update_layout(height=360, margin=dict(l=8,r=8,t=55,b=8), paper_bgcolor="rgba(0,0,0,0)")
+      st.plotly_chart(fig, use_container_width=True, key="analyse_pie_domaines")
+    with c2:
+      fig = make_subplots(rows=1, cols=2, specs=[[{"type": "domain"}, {"type": "domain"}]],
+                          subplot_titles=("Email", "Site web"))
+      fig.add_trace(go.Pie(labels=["Présent", "Absent"], values=[int(vue["_email_ok"].sum()), int((~vue["_email_ok"]).sum())], hole=.5, name="Email"), row=1, col=1)
+      fig.add_trace(go.Pie(labels=["Présent", "Absent"], values=[int(vue["_site_ok"].sum()), int((~vue["_site_ok"]).sum())], hole=.5, name="Site web"), row=1, col=2)
+      fig.update_traces(marker_colors=["#10B981", "#CBD5E1"], hovertemplate="%{label}<br>%{value} entreprise(s)<extra></extra>")
+      fig.update_layout(height=360, title="Disponibilité des coordonnées", margin=dict(l=8,r=8,t=65,b=8), paper_bgcolor="rgba(0,0,0,0)", showlegend=False)
+      st.plotly_chart(fig, use_container_width=True, key="analyse_donut_coordonnees")
+
+    c1, c2 = st.columns(2)
+    sector_counts = vue["secteur"].value_counts().head(15).sort_values().rename_axis("Secteur").reset_index(name="Entreprises")
+    with c1:
+      fig = px.bar(sector_counts, x="Entreprises", y="Secteur", orientation="h", text="Entreprises",
+                   title="Entreprises par secteur", color="Entreprises", color_continuous_scale=["#93C5FD", "#2563EB", "#7C3AED"])
+      fig.update_layout(height=max(330, 28 * len(sector_counts) + 100), margin=dict(l=8,r=25,t=55,b=8), coloraxis_showscale=False)
+      fig.update_traces(textposition="outside")
+      st.plotly_chart(fig, use_container_width=True, key="analyse_secteurs")
+    with c2:
+      domain_top = domaine_counts.sort_values("Entreprises", ascending=False).head(10).sort_values("Entreprises")
+      fig = px.bar(domain_top, x="Entreprises", y="Domaine", orientation="h", text="Entreprises",
+                   title="Top 10 des domaines", color="Entreprises", color_continuous_scale=["#BFDBFE", "#7C3AED"])
+      fig.update_layout(height=max(330, 28 * len(domain_top) + 100), margin=dict(l=8,r=25,t=55,b=8), coloraxis_showscale=False)
+      fig.update_traces(textposition="outside")
+      st.plotly_chart(fig, use_container_width=True, key="analyse_top_domaines")
+
+    rated = vue[vue["_note"].between(0.01, 5)].copy()
+    if not rated.empty:
+      st.markdown("### ⭐ Analyse des notes")
+      c1, c2 = st.columns(2)
+      with c1:
+        fig = px.histogram(rated, x="_note", nbins=10, title="Distribution des notes des entreprises",
+                           labels={"_note": "Note (sur 5)", "count": "Entreprises"}, color_discrete_sequence=["#06B6D4"])
+        fig.update_layout(height=330, margin=dict(l=8,r=8,t=55,b=8), paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True, key="analyse_hist_notes")
+      with c2:
+        rated["_rang"] = range(1, len(rated) + 1)
+        fig = px.scatter(rated, x="_rang", y="_note", color="domaine", hover_name="nom",
+                         hover_data={"secteur": True, "nombre_avis": True} if "nombre_avis" in rated.columns else {"secteur": True},
+                         title="Notes par entreprise et domaine", labels={"_rang": "Rang dans les données", "_note": "Note (sur 5)"}, color_discrete_sequence=couleurs)
+        fig.update_layout(height=330, margin=dict(l=8,r=8,t=55,b=8), paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True, key="analyse_scatter_notes")
+      domaines_notes = rated.groupby("domaine").filter(lambda groupe: len(groupe) >= 2)
+      if not domaines_notes.empty and domaines_notes["domaine"].nunique() >= 2:
+        c1, c2 = st.columns(2)
+        with c1:
+          fig = px.box(domaines_notes, x="domaine", y="_note", color="domaine", title="Distribution des notes par domaine", color_discrete_sequence=couleurs)
+          fig.update_layout(height=360, margin=dict(l=8,r=8,t=55,b=8), showlegend=False, xaxis_title=None, yaxis_title="Note (sur 5)")
+          st.plotly_chart(fig, use_container_width=True, key="analyse_box_notes")
+        with c2:
+          fig = px.violin(domaines_notes, x="domaine", y="_note", color="domaine", box=True, points="outliers", title="Densité des notes par domaine", color_discrete_sequence=couleurs)
+          fig.update_layout(height=360, margin=dict(l=8,r=8,t=55,b=8), showlegend=False, xaxis_title=None, yaxis_title="Note (sur 5)")
+          st.plotly_chart(fig, use_container_width=True, key="analyse_violin_notes")
+    else:
+      st.info("Aucune note numérique n’est disponible dans cette sélection : les graphiques de notes sont masqués.")
+
+    st.markdown("### 🗺️ Analyse comparative")
+    hierarchy = vue.copy()
+    hierarchy["domaine"] = hierarchy["domaine"].replace("", "Non renseigné")
+    hierarchy["secteur"] = hierarchy["secteur"].replace("", "Non renseigné")
+    hierarchy["sous_secteur"] = hierarchy["sous_secteur"].replace("", "Non renseigné")
+    c1, c2 = st.columns(2)
+    with c1:
+      fig = px.treemap(hierarchy, path=["domaine", "secteur", "sous_secteur"], title="Domaines et sous-domaines · Treemap", color="domaine", color_discrete_sequence=couleurs)
+      fig.update_layout(height=420, margin=dict(l=5,r=5,t=55,b=5), paper_bgcolor="rgba(0,0,0,0)")
+      st.plotly_chart(fig, use_container_width=True, key="analyse_treemap")
+    with c2:
+      fig = px.sunburst(hierarchy, path=["domaine", "secteur", "sous_secteur"], title="Hiérarchie domaine → secteur → sous-secteur", color="domaine", color_discrete_sequence=couleurs)
+      fig.update_layout(height=420, margin=dict(l=5,r=5,t=55,b=5), paper_bgcolor="rgba(0,0,0,0)")
+      st.plotly_chart(fig, use_container_width=True, key="analyse_sunburst")
+
+    heat = pd.crosstab(vue["domaine"], vue["secteur"])
+    if not heat.empty:
+      fig = px.imshow(heat, text_auto=True, aspect="auto", color_continuous_scale="Blues", title="Heatmap · domaines et secteurs")
+      fig.update_layout(height=max(300, 45 * len(heat) + 100), margin=dict(l=8,r=8,t=55,b=8), xaxis_title="Secteur", yaxis_title="Domaine")
+      st.plotly_chart(fig, use_container_width=True, key="analyse_heatmap")
+
+    # Radar sur des indicateurs réels exprimés en pourcentage commun.
+    domaines_radar = vue.groupby("domaine").agg(
+      part=("nom", "size"),
+      email_pct=("_email_ok", "mean"),
+      site_pct=("_site_ok", "mean"),
+      note_moy=("_note", lambda s: s[s.between(0.01, 5)].mean() if s.between(0.01, 5).any() else float("nan")),
+    ).sort_values("part", ascending=False).head(6)
+    if len(domaines_radar) >= 2:
+      indicateurs = ["Part des entreprises", "Couverture email", "Couverture site", "Note moyenne / 5"]
+      fig = go.Figure()
+      for domaine, ligne in domaines_radar.iterrows():
+        valeurs = [100 * ligne["part"] / len(vue), 100 * ligne["email_pct"], 100 * ligne["site_pct"], 20 * ligne["note_moy"] if pd.notna(ligne["note_moy"]) else 0]
+        fig.add_trace(go.Scatterpolar(r=valeurs, theta=indicateurs, fill="toself", name=str(domaine)))
+      fig.update_layout(title="Comparaison des domaines · indicateurs normalisés", polar=dict(radialaxis=dict(visible=True, range=[0, 100], ticksuffix="%")), height=440, margin=dict(l=25,r=25,t=65,b=25), colorway=couleurs)
+      st.plotly_chart(fig, use_container_width=True, key="analyse_radar")
+
+  st.markdown("### 📋 Données filtrées")
+  recherche = st.text_input("Rechercher une entreprise", key="analyse_table_recherche").strip()
+  table = vue.copy()
+  if recherche:
+    table = table[table["nom"].str.contains(recherche, case=False, regex=False, na=False)]
+  colonnes_table = [c for c in ("id", "nom", "domaine", "secteur", "type_acteur", "note", "email", "site_web") if c in table.columns]
+  st.dataframe(table[colonnes_table], use_container_width=True, hide_index=True)
+  st.download_button(
+    "⬇️ Exporter les résultats en CSV",
+    data=table[colonnes_table].to_csv(index=False).encode("utf-8-sig"),
+    file_name="analyse_entreprises_ia_job.csv",
+    mime="text/csv",
+    key="analyse_export_csv",
+  )
 
 
 def page_sources() -> None:
