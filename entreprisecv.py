@@ -27,8 +27,10 @@ from profil import page_profil
 
 try:
     from generator_cv import page_cv_generator
-except ImportError:
+    generator_cv_import_error = None
+except ImportError as erreur:
     page_cv_generator = None
+    generator_cv_import_error = str(erreur)
 
 router = {
     "Profil": page_profil,
@@ -41,22 +43,22 @@ router = {
     "🤖 Générateur CV": (
         page_cv_generator
         if page_cv_generator
-        else (lambda: st.error("❌ Module generator_cv.py non chargé"))
+        else (lambda: st.error(f"❌ Module generator_cv.py non chargé : {generator_cv_import_error}"))
     ),
     "Générateur CV": (
         page_cv_generator
         if page_cv_generator
-        else (lambda: st.error("❌ Module generator_cv.py non chargé"))
+        else (lambda: st.error(f"❌ Module generator_cv.py non chargé : {generator_cv_import_error}"))
     ),
     "Générateur": (
         page_cv_generator
         if page_cv_generator
-        else (lambda: st.error("❌ Module generator_cv.py non chargé"))
+        else (lambda: st.error(f"❌ Module generator_cv.py non chargé : {generator_cv_import_error}"))
     ),
     "générateur": (
         page_cv_generator
         if page_cv_generator
-        else (lambda: st.error("❌ Module generator_cv.py non chargé"))
+        else (lambda: st.error(f"❌ Module generator_cv.py non chargé : {generator_cv_import_error}"))
     ),
     "Détail": page_detail,
     "Candidature": page_candidature,
