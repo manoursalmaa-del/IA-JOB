@@ -1,5 +1,6 @@
 from urllib.parse import quote
 import urllib.parse
+from html import escape as html_escape
 from data import CSV_PATH, DATA, DOMAINES
 import pandas as pd
 import streamlit as st
@@ -346,14 +347,20 @@ def page_analyse() -> None:
 
   st.markdown("""
   <style>
-  .analyse-hero{padding:26px 30px;border-radius:22px;color:#fff;background:linear-gradient(120deg,#172554,#2563EB 58%,#7C3AED);box-shadow:0 14px 32px rgba(37,99,235,.18);margin:4px 0 22px}
-  .analyse-hero h1{color:#fff;margin:2px 0 7px;font-size:clamp(1.55rem,3vw,2.15rem)}
-  .analyse-hero p{color:#eaf0ff;margin:0}
-  .analyse-eyebrow{font-size:.75rem;font-weight:800;letter-spacing:.12em;opacity:.78}
+  .analyse-hero{position:relative;overflow:hidden;padding:28px 32px;border-radius:22px;color:#fff;background:linear-gradient(118deg,#172554 0%,#2563EB 43%,#7C3AED 74%,#06B6D4 112%);box-shadow:0 16px 38px rgba(37,99,235,.23);margin:4px 0 22px;border:1px solid rgba(255,255,255,.22)}
+  .analyse-hero:after{content:"";position:absolute;width:230px;height:230px;border-radius:50%;right:7%;top:-150px;background:rgba(255,255,255,.13);box-shadow:0 0 0 35px rgba(255,255,255,.05)}
+  .analyse-hero-content{position:relative;z-index:1}
+  .analyse-hero h1{color:#fff;margin:10px 0 8px;font-size:clamp(1.55rem,3vw,2.2rem);line-height:1.15}
+  .analyse-hero p{color:#eaf0ff;margin:0;max-width:780px}
+  .analyse-eyebrow{display:inline-block;padding:6px 11px;border-radius:999px;background:rgba(255,255,255,.16);font-size:.72rem;font-weight:800;letter-spacing:.12em}
+  .analyse-hero-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:15px}
+  .analyse-hero-tags span{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);font-size:.78rem;font-weight:700}
+  @media(max-width:640px){.analyse-hero{padding:22px}.analyse-hero:after{right:-110px}}
   </style>
-  <div class="analyse-hero"><div class="analyse-eyebrow">IA JOB · BUSINESS INTELLIGENCE</div>
+  <div class="analyse-hero"><div class="analyse-hero-content"><div class="analyse-eyebrow">IA JOB · BUSINESS INTELLIGENCE</div>
   <h1>📊 Analyse de l’écosystème IA &amp; IT</h1>
-  <p>Explorez les données et découvrez les tendances des entreprises technologiques à Marrakech.</p></div>
+  <p>Explorez les données et découvrez les tendances des entreprises technologiques à Marrakech.</p>
+  <div class="analyse-hero-tags"><span>📍 Marrakech</span><span>📊 Analyse interactive</span><span>✨ Tendances IA &amp; IT</span></div></div></div>
   """, unsafe_allow_html=True)
 
   # Filtres dynamiques basés sur les valeurs présentes.
@@ -407,10 +414,33 @@ def page_analyse() -> None:
     ("🌐 Avec site", int(vue["_site_ok"].sum())),
     ("⭐ Note moyenne", note_moyenne),
   ]
+  kpi_colors = [
+    ("#EFF6FF", "#2563EB"), ("#F3E8FF", "#7C3AED"),
+    ("#ECFDF5", "#059669"), ("#ECFEFF", "#0891B2"),
+    ("#FFFBEB", "#D97706"),
+  ]
+  st.markdown("""
+  <style>
+  .analyse-kpi-card{position:relative;overflow:hidden;min-height:104px;padding:16px 17px;border:1px solid color-mix(in srgb,var(--accent) 20%,white);border-radius:17px;background:linear-gradient(145deg,var(--tint),#fff 86%);box-shadow:0 8px 22px rgba(15,23,42,.06);transition:transform .18s ease,box-shadow .18s ease;margin-bottom:14px}
+  .analyse-kpi-card:hover,.analyse-insight-card:hover{transform:translateY(-3px);box-shadow:0 14px 26px rgba(15,23,42,.11)}
+  .analyse-kpi-card:after{content:"";position:absolute;width:74px;height:74px;right:-23px;top:-26px;border-radius:50%;background:color-mix(in srgb,var(--accent) 12%,transparent)}
+  .analyse-kpi-label{position:relative;z-index:1;color:#475569;font-size:.84rem;font-weight:700;white-space:normal}
+  .analyse-kpi-value{position:relative;z-index:1;margin-top:11px;color:var(--accent);font-size:clamp(1.4rem,2.1vw,1.9rem);font-weight:850;line-height:1.08;overflow-wrap:anywhere}
+  .analyse-insight-card{position:relative;overflow:hidden;min-height:98px;padding:15px 16px;border:1px solid color-mix(in srgb,var(--accent) 20%,white);border-left:4px solid var(--accent);border-radius:16px;background:linear-gradient(145deg,var(--tint),#fff 90%);box-shadow:0 7px 18px rgba(15,23,42,.055);transition:transform .18s ease,box-shadow .18s ease;margin-bottom:16px}
+  .analyse-insight-label{color:var(--accent);font-size:.8rem;font-weight:800;letter-spacing:.015em}
+  .analyse-insight-value{margin-top:8px;color:#172554;font-size:clamp(1.08rem,1.7vw,1.45rem);font-weight:800;line-height:1.18;overflow-wrap:anywhere;word-break:break-word}
+  @media(prefers-reduced-motion:reduce){.analyse-kpi-card,.analyse-insight-card{transition:none}}
+  </style>
+  """, unsafe_allow_html=True)
   st.caption(f"Analyse de {len(vue)} entreprise(s) après filtres · {len(df)} dans le dataset")
-  for col, (label, value) in zip(st.columns(5), kpis):
+  for col, (label, value), (tint, accent) in zip(st.columns(5), kpis, kpi_colors):
     with col:
-      st.metric(label, value)
+      st.markdown(
+          f'<div class="analyse-kpi-card" style="--tint:{tint};--accent:{accent}">'
+          f'<div class="analyse-kpi-label">{html_escape(str(label))}</div>'
+          f'<div class="analyse-kpi-value">{html_escape(str(value))}</div></div>',
+          unsafe_allow_html=True,
+      )
 
   if vue.empty:
     st.info("Aucune entreprise ne correspond aux filtres sélectionnés.")
@@ -426,9 +456,15 @@ def page_analyse() -> None:
     ("Couverture email", f"{vue['_email_ok'].mean() * 100:.1f}%"),
     ("Couverture site web", f"{vue['_site_ok'].mean() * 100:.1f}%"),
   ]
-  for col, (label, value) in zip(insight_cols, insights):
+  insight_colors = [("#EFF6FF", "#2563EB"), ("#F5F3FF", "#7C3AED"), ("#ECFDF5", "#059669"), ("#FFF7ED", "#EA580C")]
+  for col, (label, value), (tint, accent) in zip(insight_cols, insights, insight_colors):
     with col:
-      st.container(border=True).metric(label, value)
+      st.markdown(
+          f'<div class="analyse-insight-card" style="--tint:{tint};--accent:{accent}">'
+          f'<div class="analyse-insight-label">✨ {html_escape(str(label))}</div>'
+          f'<div class="analyse-insight-value">{html_escape(str(value))}</div></div>',
+          unsafe_allow_html=True,
+      )
   domaine_note = vue[vue["_note"].between(0.01, 5)].groupby("domaine")["_note"].mean().sort_values(ascending=False)
   if not domaine_note.empty:
     st.caption(f"Meilleure note moyenne observée : {domaine_note.index[0]} ({domaine_note.iloc[0]:.1f}/5), sur les entreprises notées.")

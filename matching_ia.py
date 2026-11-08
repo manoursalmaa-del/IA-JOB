@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from html import escape
 
 import pandas as pd
 import streamlit as st
@@ -94,6 +95,20 @@ def _text_similarity(profile_text, offer_text):
 def page_matching_ia():
     st.title("🧠 Matching IA")
     st.caption("Découvrez les offres qui correspondent à votre profil, à partir de votre CV et des annonces disponibles dans IA JOB.")
+    st.markdown("""
+    <style>
+    .matching-stat-card{box-sizing:border-box;min-height:108px;padding:16px 18px;border-radius:16px;box-shadow:0 8px 20px rgba(23,37,84,.10);display:flex;flex-direction:column;justify-content:center}
+    .matching-stat-label{font-size:.86rem;font-weight:650;color:#334155}
+    .matching-stat-value{font-size:1.9rem;font-weight:800;line-height:1.2;margin-top:8px;color:#172554}
+    .matching-offer-card{box-sizing:border-box;margin:0 0 16px;padding:20px 22px;border-radius:18px;box-shadow:0 8px 22px rgba(23,37,84,.11);border:1px solid #dbe4f0;border-left:6px solid var(--match-accent);background:linear-gradient(135deg,var(--match-tint) 0%,#fff 78%);}
+    .matching-offer-title{font-size:1.18rem;font-weight:800;color:#172554;margin:0 0 10px;line-height:1.4}
+    .matching-offer-meta{color:#475569;font-size:.92rem;margin:0 0 10px;line-height:1.55}
+    .matching-offer-badge{display:inline-block;margin:0 0 10px;padding:5px 10px;border-radius:999px;background:var(--match-badge);color:var(--match-accent);font-size:.82rem;font-weight:750}
+    .matching-offer-description{color:#334155;line-height:1.6;margin:10px 0 14px;white-space:pre-wrap}
+    .matching-offer-link{display:inline-block;padding:10px 16px;border-radius:10px;background:var(--match-accent);color:white!important;text-decoration:none!important;font-weight:700}
+    .matching-offer-link:hover{filter:brightness(.94);text-decoration:none!important}
+    </style>
+    """, unsafe_allow_html=True)
 
     with st.container(border=True):
         st.subheader("📄 Analysez votre profil")
@@ -180,10 +195,18 @@ def page_matching_ia():
     st.subheader("🎯 Votre compatibilité avec les offres")
     best_score = int(results.iloc[0]["score"]) if not results.empty else 0
     level = "Excellent match" if best_score >= 80 else "Bon match" if best_score >= 60 else "Match moyen" if best_score >= 40 else "Faible compatibilité"
-    k1, k2, k3 = st.columns(3)
-    k1.metric("Meilleure compatibilité", f"{best_score}%", level)
-    k2.metric("Offres comparées", len(results))
-    k3.metric("Compétences renseignées", len(profile_skills))
+    stat_cards = [
+        ("🏆 Meilleure compatibilité", f"{best_score}%", "#dbeafe", "#bfdbfe", "#2563eb"),
+        ("📋 Offres comparées", str(len(results)), "#ede9fe", "#ddd6fe", "#7c3aed"),
+        ("🧠 Compétences renseignées", str(len(profile_skills)), "#cffafe", "#a5f3fc", "#0891b2"),
+    ]
+    for col, (label, value, tint, border, accent) in zip(st.columns(3), stat_cards):
+        with col:
+            st.markdown(
+                f'<div class="matching-stat-card" style="background:linear-gradient(140deg,{tint},#fff 95%);border:1px solid {border};border-top:4px solid {accent};">'
+                f'<div class="matching-stat-label">{label}</div><div class="matching-stat-value">{value}</div></div>',
+                unsafe_allow_html=True,
+            )
     st.caption("Méthode : 75 % de couverture des compétences détectées dans l’annonce + 25 % de similarité textuelle du CV et de l’offre. Si l’annonce ne mentionne aucune compétence reconnue, le score repose sur la similarité textuelle.")
 
     with st.expander("🎛️ Filtrer les recommandations", expanded=True):
@@ -209,22 +232,37 @@ def page_matching_ia():
     for index, job in shown.iterrows():
         score = int(job["score"])
         badge = "🟢 Excellent match" if score >= 80 else "🔵 Bon match" if score >= 60 else "🟠 Match moyen" if score >= 40 else "🔴 À améliorer"
-        with st.container(border=True):
-            st.markdown(f"### {job['titre'] or 'Poste non renseigné'} · **{score}%**")
-            st.write(f"**{job['entreprise'] or 'Entreprise non renseignée'}** · {job['ville'] or 'Lieu non renseigné'} · {job['type_offre'] or 'Type non renseigné'}")
-            st.caption(f"{badge} · {job['domaine'] or 'Domaine non renseigné'} · Source : {job['source'] or 'non renseignée'} · Publiée : {job['date_publication'] or 'date inconnue'}")
-            if job["maitrisees"]:
-                st.write("✅ **Compétences maîtrisées demandées :** " + ", ".join(job["maitrisees"]))
-            if job["manquantes"]:
-                st.write("🟠 **Compétences demandées à développer :** " + ", ".join(job["manquantes"]))
-                st.caption("Piste : recherchez des cours pratiques ou de la documentation officielle sur ces compétences.")
-            if str(job["description"]).strip():
-                st.write(str(job["description"])[:600])
-            url = str(job["url"]).strip()
-            if url.startswith(("https://", "http://")):
-                st.link_button("Voir l’offre / postuler", url, key=f"matching_offer_{index}")
-            else:
-                st.caption("Lien original non disponible.")
+        tint, accent, badge_bg = ("#dcfce7", "#059669", "#ecfdf5") if score >= 80 else ("#dbeafe", "#2563eb", "#eff6ff") if score >= 60 else ("#fef3c7", "#d97706", "#fffbeb") if score >= 40 else ("#fee2e2", "#dc2626", "#fef2f2")
+        title = escape(str(job["titre"] or "Poste non renseigné"))
+        company = escape(str(job["entreprise"] or "Entreprise non renseignée"))
+        city_name = escape(str(job["ville"] or "Lieu non renseigné"))
+        offer_type_name = escape(str(job["type_offre"] or "Type non renseigné"))
+        domain_name = escape(str(job["domaine"] or "Domaine non renseigné"))
+        source_name = escape(str(job["source"] or "non renseignée"))
+        date_name = escape(str(job["date_publication"] or "date inconnue"))
+        description = escape(str(job["description"])[:600])
+        mastered = escape(", ".join(job["maitrisees"]))
+        missing = escape(", ".join(job["manquantes"]))
+        card_html = (
+            f'<div class="matching-offer-card" style="--match-tint:{tint};--match-accent:{accent};--match-badge:{badge_bg};">'
+            f'<div class="matching-offer-title">🏢 {title} · {score}%</div>'
+            f'<div class="matching-offer-meta"><strong>{company}</strong> · {city_name} · {offer_type_name}</div>'
+            f'<div class="matching-offer-badge">{escape(badge)}</div>'
+            f'<div class="matching-offer-meta">{domain_name} · Source : {source_name} · Publiée : {date_name}</div>'
+        )
+        if mastered:
+            card_html += f'<div class="matching-offer-meta">✅ <strong>Compétences maîtrisées demandées :</strong> {mastered}</div>'
+        if missing:
+            card_html += f'<div class="matching-offer-meta">🟠 <strong>Compétences à développer :</strong> {missing}</div>'
+        if description.strip():
+            card_html += f'<div class="matching-offer-description">{description}</div>'
+        url = str(job["url"]).strip()
+        if url.startswith(("https://", "http://")):
+            card_html += f'<a class="matching-offer-link" href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">🌐 Voir l’offre / postuler</a>'
+        else:
+            card_html += '<span class="matching-offer-meta">Lien original non disponible.</span>'
+        card_html += '</div>'
+        st.markdown(card_html, unsafe_allow_html=True)
 
     # Visualisations générées uniquement avec les offres réelles comparées.
     try:
